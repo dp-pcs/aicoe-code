@@ -135,27 +135,41 @@ export function DialogTriageCost(props: DialogTriageCostProps) {
           props.onDismiss()
         },
       },
+      // 1–9 direct pick
+      ...Array.from({ length: 9 }, (_, n) => ({
+        key: String(n + 1),
+        desc: `Pick model ${n + 1}`,
+        group: "Dialog",
+        cmd: () => {
+          const data = assessment()
+          if (!data) return
+          if (n < data.estimates.length) {
+            setStore("selectedIndex", n)
+          }
+        },
+      })),
     ],
   }))
 
   return (
     <box paddingLeft={2} paddingRight={2} paddingTop={1} gap={1}>
+
       {/* Title row */}
       <box flexDirection="row" justifyContent="space-between">
         <text attributes={TextAttributes.BOLD} fg={theme.text}>
-          Cost estimate
+          COST MENU · per request
         </text>
         <text fg={theme.textMuted} onMouseUp={() => { dialog.clear(); props.onDismiss() }}>
           esc skip
         </text>
       </box>
 
-      {/* Loading state */}
+      {/* Loading */}
       <Show when={assessment.loading}>
         <text fg={theme.textMuted}>Assessing request...</text>
       </Show>
 
-      {/* Error state */}
+      {/* Error */}
       <Show when={assessment.error}>
         <box gap={1}>
           <text fg={theme.error}>Assessment failed — continuing with current model.</text>
@@ -172,53 +186,121 @@ export function DialogTriageCost(props: DialogTriageCostProps) {
 
       {/* Results */}
       <Show when={assessment()}>
-        {(data) => (
-          <>
-            {/* Triage summary */}
-            <text fg={theme.textMuted}>
-              {data().triageResult.complexity} task ·{" "}
-              {data().triageResult.suggestedTier} tier ·{" "}
-              ~{data().triageResult.estimatedOutputTokens} output tokens
-              {data().triageResult.tier === 2 ? " · escalated" : ""}
-            </text>
+        {(data) => {
+          const rec = data().estimates[data().recommendedIndex]
+          const dearest = data().estimates.reduce(
+            (a, b) => (b.cost > a.cost ? b : a),
+            data().estimates[0]!,
+          )
+          const saved = rec ? Math.max(0, (dearest?.cost ?? 0) - rec.cost) : 0
+          const pct = dearest && dearest.cost > 0 && rec
+            ? Math.round((1 - rec.cost / dearest.cost) * 100)
+            : 0
 
-            {/* Model list */}
-            <For each={data().estimates}>
-              {(estimate, i) => {
-                const isSelected = () => i() === store.selectedIndex
-                const isRec = () => i() === data().recommendedIndex
-                return (
-                  <box
-                    flexDirection="row"
-                    justifyContent="space-between"
-                    paddingLeft={1}
-                    paddingRight={1}
-                    backgroundColor={isSelected() ? theme.primary : undefined}
-                    onMouseUp={() => {
-                      setStore("selectedIndex", i())
-                      confirm()
-                    }}
-                  >
-                    <text fg={isSelected() ? theme.selectedListItemText : theme.text}>
-                      {isSelected() ? "▶ " : "  "}
-                      {estimate.model.label}
-                      {isRec() ? " ✓" : ""}
+          return (
+            <>
+              {/* Triage context line */}
+              <text fg={theme.textMuted}>
+                {data().triageResult.complexity} task ·{" "}
+                ~{data().triageResult.estimatedOutputTokens} output tokens
+                {data().triageResult.tier === 2 ? " · escalated" : ""}
+              </text>
+
+              {/* Model rows */}
+              <For each={data().estimates}>
+                {(estimate, i) => {
+                  const isSelected = () => i() === store.selectedIndex
+                  const isRec = () => i() === data().recommendedIndex
+                  const ratio = rec && rec.cost > 0 ? estimate.cost / rec.cost : 1
+                  const note = isRec()
+                    ? "BEST VALUE"
+                    : ratio > 1.2
+                      ? `${ratio.toFixed(1)}× more`
+                      : ""
+                  const costFg = () =>
+                    isSelected()
+                      ? theme.selectedListItemText
+                      : isRec()
+                        ? theme.success
+                        : ratio >= 10
+                          ? theme.warning
+                          : theme.text
+
+                  return (
+                    <box
+                      flexDirection="row"
+                      paddingLeft={1}
+                      paddingRight={1}
+                      backgroundColor={isSelected() ? theme.primary : undefined}
+                      onMouseUp={() => {
+                        setStore("selectedIndex", i())
+                        confirm()
+                      }}
+                    >
+                      {/* ★ recommended marker */}
+                      <text fg={theme.warning}>
+                        {isRec() ? "★ " : "  "}
+                      </text>
+                      {/* › cursor */}
+                      <text fg={isSelected() ? theme.accent : theme.textMuted}>
+                        {isSelected() ? "› " : "  "}
+                      </text>
+                      {/* number */}
+                      <text fg={theme.textMuted}>{`${i() + 1} `}</text>
+                      {/* label */}
+                      <text fg={theme.text}>
+                        {estimate.model.label.padEnd(20)}
+                      </text>
+                      {/* provider */}
+                      <text fg={theme.textMuted}>{estimate.model.provider.padEnd(11)}</text>
+                      {/* cost */}
+                      <text attributes={isRec() ? TextAttributes.BOLD : undefined} fg={costFg()}>
+                        {formatCurrency(estimate.cost).padStart(7)}{" "}
+                      </text>
+                      {/* note */}
+                      <text fg={isRec() ? theme.success : theme.textMuted}>{note}</text>
+                    </box>
+                  )
+                }}
+              </For>
+
+              {/* Savings callout — only shown when there's a meaningful saving */}
+              <Show when={saved > 0}>
+                <box
+                  flexDirection="column"
+                  borderStyle="rounded"
+                  borderColor={theme.success}
+                  paddingLeft={1}
+                  paddingRight={1}
+                >
+                  <box flexDirection="row">
+                    <text attributes={TextAttributes.BOLD} fg={theme.success}>✓ </text>
+                    <text fg={theme.text}>
+                      {`Right-sized to ${rec?.model.label} — you save `}
                     </text>
-                    <text fg={isSelected() ? theme.selectedListItemText : theme.textMuted}>
-                      {formatCurrency(estimate.cost)}{" "}
-                      in {formatRate(estimate.model.input)} · out {formatRate(estimate.model.output)}
+                    <text attributes={TextAttributes.BOLD} fg={theme.success}>
+                      {formatCurrency(saved)}
                     </text>
                   </box>
-                )
-              }}
-            </For>
+                  <text fg={theme.textMuted}>
+                    {`vs ${dearest?.model.label} · ${pct}% cheaper, same job`}
+                  </text>
+                </box>
+              </Show>
 
-            {/* Footer */}
-            <box paddingBottom={1}>
-              <text fg={theme.textMuted}>↑↓ select · Enter confirm · Esc skip check</text>
-            </box>
-          </>
-        )}
+              {/* Keybind hints */}
+              <box flexDirection="row" paddingBottom={1}>
+                <text fg={theme.textMuted}>  </text>
+                <text fg={theme.accent}>enter</text>
+                <text fg={theme.textMuted}> accept  </text>
+                <text fg={theme.accent}>1-{data().estimates.length}</text>
+                <text fg={theme.textMuted}> pick  </text>
+                <text fg={theme.accent}>esc</text>
+                <text fg={theme.textMuted}> skip</text>
+              </box>
+            </>
+          )
+        }}
       </Show>
     </box>
   )
