@@ -1,6 +1,8 @@
 export * as TuiConfig from "./tui"
 
 import path from "path"
+import os from "os"
+import fsNode from "fs/promises"
 import { mergeDeep, unique } from "remeda"
 import { Cause, Context, Effect, Fiber, Layer } from "effect"
 import { ConfigParse } from "@/config/parse"
@@ -17,7 +19,6 @@ import { TuiKeybind } from "@opencode-ai/tui/config/keybind"
 import { InstallationLocal, InstallationVersion } from "@opencode-ai/core/installation/version"
 import { makeRuntime } from "@opencode-ai/core/effect/runtime"
 import { Filesystem } from "@/util/filesystem"
-import { ConfigVariable } from "@/config/variable"
 import { Npm } from "@opencode-ai/core/npm"
 import { FormatError, FormatUnknownError } from "@/cli/error"
 import { TuiConfig } from "@opencode-ai/tui/config"
@@ -78,6 +79,46 @@ function dropUnknownKeybinds(input: Record<string, unknown>) {
   }
 }
 
+async function substituteConfigText(input: { text: string; path: string; missing?: "error" | "empty" }) {
+  const missing = input.missing ?? "error"
+  const text = input.text.replace(/\{env:([^}]+)\}/g, (_, varName) => process.env[varName] || "")
+  const fileMatches = Array.from(text.matchAll(/\{file:[^}]+\}/g))
+  if (!fileMatches.length) return text
+
+  const configDir = path.dirname(input.path)
+  let out = ""
+  let cursor = 0
+  for (const match of fileMatches) {
+    const token = match[0]
+    const index = match.index!
+    out += text.slice(cursor, index)
+
+    const lineStart = text.lastIndexOf("\n", index - 1) + 1
+    const prefix = text.slice(lineStart, index).trimStart()
+    if (prefix.startsWith("//")) {
+      out += token
+      cursor = index + token.length
+      continue
+    }
+
+    let filePath = token.replace(/^\{file:/, "").replace(/\}$/, "")
+    if (filePath.startsWith("~/")) filePath = path.join(os.homedir(), filePath.slice(2))
+    const resolvedPath = path.isAbsolute(filePath) ? filePath : path.resolve(configDir, filePath)
+    const fileContent = (
+      await fsNode.readFile(resolvedPath, "utf8").catch((error: NodeJS.ErrnoException) => {
+        if (missing === "empty") return ""
+        if (error.code === "ENOENT") throw new Error(`bad file reference: "${token}" ${resolvedPath} does not exist`)
+        throw new Error(`bad file reference: "${token}"`)
+      })
+    ).trim()
+
+    out += JSON.stringify(fileContent).slice(1, -1)
+    cursor = index + token.length
+  }
+  out += text.slice(cursor)
+  return out
+}
+
 const loadState = Effect.fn("TuiConfig.loadState")(function* (ctx: { directory: string }) {
   const afs = yield* FSUtil.Service
   let appliedOrder = 0
@@ -96,9 +137,7 @@ const loadState = Effect.fn("TuiConfig.loadState")(function* (ctx: { directory: 
 
   const load = (text: string, configFilepath: string): Effect.Effect<Info> =>
     Effect.gen(function* () {
-      const expanded = yield* Effect.promise(() =>
-        ConfigVariable.substitute({ text, type: "path", path: configFilepath, missing: "empty" }),
-      )
+      const expanded = yield* Effect.promise(() => substituteConfigText({ text, path: configFilepath, missing: "empty" }))
       const data = ConfigParse.jsonc(expanded, configFilepath)
       if (!isRecord(data)) return {} as Info
       // Flatten a nested "tui" key so users who wrote `{ "tui": { ... } }` inside tui.json
