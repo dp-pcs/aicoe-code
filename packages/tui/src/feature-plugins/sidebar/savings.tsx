@@ -72,12 +72,16 @@ function shortModelId(providerID: string, modelID: string): string {
 function View(props: { api: TuiPluginApi; session_id: string }) {
   const theme = () => props.api.theme.current
   const msgs = createMemo(() => props.api.state.session.messages(props.session_id))
-  const session = createMemo(() => props.api.state.session.get(props.session_id))
 
-  const actualCost = createMemo(() => session()?.cost ?? 0)
-
+  // Derive costs from individual assistant messages so both actual and
+  // counterfactual update reactively as each turn completes — session()?.cost
+  // lags because it only updates when a session.updated event fires.
   const assistantMsgs = createMemo(() =>
     msgs().filter((m): m is AssistantMessage => m.role === "assistant" && m.tokens.output > 0),
+  )
+
+  const actualCost = createMemo(() =>
+    assistantMsgs().reduce((sum, msg) => sum + msg.cost, 0),
   )
 
   const frontierCost = createMemo(() =>
