@@ -25,7 +25,6 @@ import {
   triage,
   estimateInputTokens,
   type TriageResult,
-  type TriageEnv,
 } from "@opencode-ai/aicoe-cost/triage"
 import {
   estimateMenu,
@@ -35,6 +34,7 @@ import {
   type CostEstimate,
 } from "@opencode-ai/aicoe-cost/estimator"
 import { GATEWAY_MODELS } from "@opencode-ai/aicoe-cost/pricing"
+import { resolveTriageEnv } from "@opencode-ai/aicoe-cost/credentials"
 
 export interface TriageCostResult {
   providerID: string
@@ -50,12 +50,7 @@ export type DialogTriageCostProps = {
   onDismiss: () => void
 }
 
-function getTriageEnv(): TriageEnv {
-  return {
-    litellmUrl: process.env["AICOE_LITELLM_URL"],
-    apiKey: process.env["AICOE_API_KEY"],
-  }
-}
+
 
 /** Map a gateway model ID like "anthropic/claude-sonnet-4-6" to { providerID, modelID } */
 function splitGatewayModelId(id: string): { providerID: string; modelID: string } {
@@ -73,8 +68,7 @@ export function DialogTriageCost(props: DialogTriageCostProps) {
   const [assessment] = createResource(
     () => props.promptText,
     async (promptText) => {
-      const env = getTriageEnv()
-      const triageResult = await triage(promptText, env)
+      const triageResult = await triage(promptText, resolveTriageEnv())
       const inputTokens = estimateInputTokens(promptText)
       const allModelIds = GATEWAY_MODELS.map((m) => m.id)
       const estimates = estimateMenu(allModelIds, inputTokens, triageResult.estimatedOutputTokens)

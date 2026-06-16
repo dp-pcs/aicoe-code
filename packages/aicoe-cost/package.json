@@ -12,7 +12,8 @@
     ".": "./src/index.ts",
     "./triage": "./src/triage.ts",
     "./estimator": "./src/estimator.ts",
-    "./pricing": "./src/pricing.ts"
+    "./pricing": "./src/pricing.ts",
+    "./credentials": "./src/credentials.ts"
   },
   "devDependencies": {
     "@tsconfig/bun": "catalog:",
