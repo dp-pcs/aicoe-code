@@ -1,0 +1,22 @@
+# aicoe-code/.agent/synapse.yaml — Synapse binding for the aicoe-code fork.
+# This repo is the opencode fork that replaces the cli/ subtree in ai-spend.
+# Same upstream Synapse project as ai-spend (project.ai-spend).
+# Tokens are NEVER stored here; only the identity declaration. Commit-safe.
+project_id: project.ai-spend
+team_id: team.ai-coe
+synapse_url: https://cnu.synapse-os.ai
+
+# Agent identity preference order. First hit with a Keychain token wins.
+agents:
+  - agent.ai-spend-a-dp-agent
+
+# What kinds of work in this repo are worth logging to Synapse.
+reportable:
+  - artifact_produced
+  - decision_made
+  - kr_advanced
+  - commit_pushed
+
+# Which org objectives this repo's work tends to serve.
+objective_hints:
+  - adoption
