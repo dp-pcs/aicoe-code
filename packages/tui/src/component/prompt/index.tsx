@@ -51,6 +51,10 @@ import { createFadeIn } from "../../util/signal"
 import { DialogSkill } from "../dialog-skill"
 import { DialogWorkspaceUnavailable } from "../dialog-workspace-unavailable"
 import { DialogTriageCost } from "../dialog-triage-cost"
+import { triage, estimateInputTokens } from "@opencode-ai/aicoe-cost/triage"
+import { pickRecommendation, estimateMenu } from "@opencode-ai/aicoe-cost/estimator"
+import { findGatewayModel, GATEWAY_MODELS, TIER_RANK } from "@opencode-ai/aicoe-cost/pricing"
+import { resolveTriageEnv } from "@opencode-ai/aicoe-cost/credentials"
 import { useArgs } from "../../context/args"
 import { OPENCODE_BASE_MODE, useBindings, useCommandShortcut, useLeaderActive, useOpencodeKeymap } from "../../keymap"
 import { useTuiConfig } from "../../config"
@@ -966,21 +970,43 @@ export function Prompt(props: PromptProps) {
       return false
     }
 
-    // ── aicoe-cost: triage + cost check for new sessions ─────────────────────
-    // Only intercept when starting a brand-new session (props.sessionID is
-    // null/undefined).  Follow-up prompts in an existing session reuse the
-    // already-chosen model without re-triaging.
-    if (!props.sessionID) {
-      const triageChoice = await DialogTriageCost.show(dialog, store.prompt.input)
-      if (triageChoice !== null) {
-        // User confirmed a model from the cost menu — override local selection.
-        local.model.set(
-          { providerID: triageChoice.providerID, modelID: triageChoice.modelID },
-          { recent: true },
-        )
+    // ── aicoe-cost: Option C triage ──────────────────────────────────────────
+    // Run triage silently on every user message. Only show the cost menu when
+    // the recommendation is a different tier than the currently selected model.
+    // This means:
+    //   - New session, first prompt → always shows (no current model tier context)
+    //   - Follow-up in existing session, same task → silent, no interruption
+    //   - Task pivots to harder/cheaper work mid-session → menu appears
+    //   - Multi-step tool loops → never interrupted (no user message fired)
+    {
+      const env = resolveTriageEnv()
+      const promptText = store.prompt.input
+      const triageResult = await triage(promptText, env)
+
+      // Find current model's tier from the gateway registry
+      const cur = selectedModel
+      const curGatewayId = `${cur.providerID}/${cur.modelID}`
+      const curGatewayModel = findGatewayModel(curGatewayId)
+      const curTierRank = curGatewayModel ? TIER_RANK[curGatewayModel.tier] : -1
+
+      // Find what tier triage recommends
+      const inputTokens = estimateInputTokens(promptText)
+      const allModelIds = GATEWAY_MODELS.map((m) => m.id)
+      const estimates = estimateMenu(allModelIds, inputTokens, triageResult.estimatedOutputTokens)
+      const recommendation = pickRecommendation(estimates, triageResult.suggestedTier)
+      const recTierRank = TIER_RANK[recommendation.model.tier]
+
+      // Show the menu only when the recommended tier differs from current
+      const tierChanged = curTierRank === -1 || recTierRank !== curTierRank
+      if (tierChanged) {
+        const triageChoice = await DialogTriageCost.show(dialog, promptText)
+        if (triageChoice !== null) {
+          local.model.set(
+            { providerID: triageChoice.providerID, modelID: triageChoice.modelID },
+            { recent: true },
+          )
+        }
       }
-      // If triageChoice is null the user dismissed and we continue with the
-      // currently selected model unchanged.
     }
     // ─────────────────────────────────────────────────────────────────────────
 
