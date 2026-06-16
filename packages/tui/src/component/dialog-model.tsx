@@ -8,6 +8,25 @@ import { DialogVariant } from "./dialog-variant"
 import * as fuzzysort from "fuzzysort"
 import { useConnected } from "./use-connected"
 import { useSync } from "../context/sync"
+import { formatRate } from "@opencode-ai/aicoe-cost/estimator"
+
+/**
+ * Build a concise cost footer for the model picker.
+ *
+ * opencode stores per-token USD; we convert to per-million for readability.
+ * e.g. 0.000003 input / 0.000015 output → "$3.00 · $15.00 /M tok"
+ * Free (input === 0) models keep the "Free" label.
+ */
+function modelCostFooter(
+  cost: { input: number; output: number; cache: { read: number } } | undefined,
+  providerID: string,
+): string | undefined {
+  if (!cost) return undefined
+  if (cost.input === 0 && providerID === "opencode") return "Free"
+  const inputRate = formatRate(cost.input * 1_000_000)
+  const outputRate = formatRate(cost.output * 1_000_000)
+  return `in ${inputRate} · out ${outputRate}`
+}
 
 export function DialogModel(props: { providerID?: string }) {
   const local = useLocal()
@@ -41,7 +60,7 @@ export function DialogModel(props: { providerID?: string }) {
             description: provider.name,
             category,
             disabled: provider.id === "opencode" && model.id.includes("-nano"),
-            footer: model.cost?.input === 0 && provider.id === "opencode" ? "Free" : undefined,
+            footer: modelCostFooter(model.cost, provider.id),
             onSelect: () => {
               onSelect(provider.id, model.id)
             },
@@ -79,7 +98,7 @@ export function DialogModel(props: { providerID?: string }) {
               : undefined,
             category: connected() ? provider.name : undefined,
             disabled: provider.id === "opencode" && model.includes("-nano"),
-            footer: info.cost?.input === 0 && provider.id === "opencode" ? "Free" : undefined,
+            footer: modelCostFooter(info.cost, provider.id),
             onSelect() {
               onSelect(provider.id, model)
             },

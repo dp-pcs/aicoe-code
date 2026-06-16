@@ -50,6 +50,7 @@ import { useKV } from "../../context/kv"
 import { createFadeIn } from "../../util/signal"
 import { DialogSkill } from "../dialog-skill"
 import { DialogWorkspaceUnavailable } from "../dialog-workspace-unavailable"
+import { DialogTriageCost } from "../dialog-triage-cost"
 import { useArgs } from "../../context/args"
 import { OPENCODE_BASE_MODE, useBindings, useCommandShortcut, useLeaderActive, useOpencodeKeymap } from "../../keymap"
 import { useTuiConfig } from "../../config"
@@ -964,6 +965,24 @@ export function Prompt(props: PromptProps) {
       void promptModelWarning()
       return false
     }
+
+    // ── aicoe-cost: triage + cost check for new sessions ─────────────────────
+    // Only intercept when starting a brand-new session (props.sessionID is
+    // null/undefined).  Follow-up prompts in an existing session reuse the
+    // already-chosen model without re-triaging.
+    if (!props.sessionID) {
+      const triageChoice = await DialogTriageCost.show(dialog, store.prompt.input)
+      if (triageChoice !== null) {
+        // User confirmed a model from the cost menu — override local selection.
+        local.model.set(
+          { providerID: triageChoice.providerID, modelID: triageChoice.modelID },
+          { recent: true },
+        )
+      }
+      // If triageChoice is null the user dismissed and we continue with the
+      // currently selected model unchanged.
+    }
+    // ─────────────────────────────────────────────────────────────────────────
 
     const workspaceSession = props.sessionID ? sync.session.get(props.sessionID) : undefined
     const workspaceID = workspaceSession?.workspaceID
